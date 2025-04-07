@@ -158,7 +158,7 @@ bool RadioReceiver::playProgramme(ProgrammeHandlerInterface& handler,
 
                 if (sc.audioType() == AudioServiceComponentType::DAB ||
                     sc.audioType() == AudioServiceComponentType::DABPlus) {
-                    mscHandler.addSubchannel(
+                    mscHandler.addAudioSubchannel(
                             handler, sc.audioType(), dumpFileName, subch);
                     return true;
                 }

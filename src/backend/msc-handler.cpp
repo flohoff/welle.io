@@ -58,7 +58,7 @@ MscHandler::MscHandler(
     }
 }
 
-bool MscHandler::addSubchannel(
+bool MscHandler::addAudioSubchannel(
         ProgrammeHandlerInterface& handler,
         AudioServiceComponentType ascty,
         const std::string& dumpFileName,

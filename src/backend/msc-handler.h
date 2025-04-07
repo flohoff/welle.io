@@ -51,7 +51,7 @@ class MscHandler
         // Stop processing and remove all subchannels
         void stopProcessing(void);
 
-        bool addSubchannel(
+        bool addAudioSubchannel(
                 ProgrammeHandlerInterface& handler,
                 AudioServiceComponentType ascty,
                 const std::string& dumpFileName,
