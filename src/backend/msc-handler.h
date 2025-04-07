@@ -65,15 +65,10 @@ class MscHandler
 
         struct SelectedStream {
             SelectedStream(
-                ProgrammeHandlerInterface& handler,
                 const Subchannel& subCh) :
-                    handler(handler),
                     subCh(subCh) {}
 
-            ProgrammeHandlerInterface& handler;
-
             const Subchannel subCh;
-
             std::shared_ptr<DabVirtual> dabHandler;
         };
 
