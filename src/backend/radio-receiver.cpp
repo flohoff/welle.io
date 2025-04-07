@@ -34,6 +34,7 @@
 #include <iostream>
 #include <memory>
 #include "radio-receiver.h"
+#include "dab-audio.h"
 
 using namespace std;
 
@@ -158,8 +159,17 @@ bool RadioReceiver::playProgramme(ProgrammeHandlerInterface& handler,
 
                 if (sc.audioType() == AudioServiceComponentType::DAB ||
                     sc.audioType() == AudioServiceComponentType::DABPlus) {
-                    mscHandler.addAudioSubchannel(
-                            handler, sc.audioType(), dumpFileName, subch);
+
+		    auto dabhandler=std::make_shared<DabAudio>(
+			sc.audioType(),
+			subch.length * CUSize,
+			subch.bitrate(),
+			subch.protectionSettings,
+			handler,
+			dumpFileName);
+
+                    mscHandler.addSubchannel(subch, dabhandler);
+
                     return true;
                 }
             }

@@ -23,9 +23,8 @@
  */
 #include <algorithm>
 #include "dab-constants.h"
-#include "msc-handler.h"
 #include "dab-virtual.h"
-#include "dab-audio.h"
+#include "msc-handler.h"
 
 //  Interface program for processing the MSC.
 //  Merely a dispatcher for the selected service
@@ -58,11 +57,9 @@ MscHandler::MscHandler(
     }
 }
 
-bool MscHandler::addAudioSubchannel(
-        ProgrammeHandlerInterface& handler,
-        AudioServiceComponentType ascty,
-        const std::string& dumpFileName,
-        const Subchannel& sub)
+bool MscHandler::addSubchannel(
+	const Subchannel& sub,
+	std::shared_ptr<DabVirtual> dabHandler)
 {
     std::lock_guard<std::mutex> lock(mutex);
 
@@ -73,29 +70,7 @@ bool MscHandler::addAudioSubchannel(
         }
     }
 
-    SelectedStream s(sub);
-
-    s.dabHandler = std::make_shared<DabAudio>(
-                ascty,
-                sub.length * CUSize,
-                sub.bitrate(),
-                sub.protectionSettings,
-                handler,
-                dumpFileName);
-
-     /* TODO dealing with data
-      s.dabHandler = std::make_shared<DabData>(radioInterface,
-                                  new_DSCTy,
-                                  new_packetAddress,
-                                  subChannel.length * CUSize,
-                                  subChannel.bitrate(),
-                                  subChannel.shortForm,
-                                  subChannel.protLevel,
-                                  new_DGflag,
-                                  new_FEC_scheme,
-                                  show_crcErrors);
-      */
-
+    SelectedStream s(sub, dabHandler);
     streams.push_back(std::move(s));
 
     work_to_be_done = true;

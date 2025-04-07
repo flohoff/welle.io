@@ -40,6 +40,7 @@
 #include "dab-constants.h"
 #include "ringbuffer.h"
 #include "radio-controller.h"
+#include "dab-virtual.h"
 
 class DabVirtual;
 
@@ -51,11 +52,9 @@ class MscHandler
         // Stop processing and remove all subchannels
         void stopProcessing(void);
 
-        bool addAudioSubchannel(
-                ProgrammeHandlerInterface& handler,
-                AudioServiceComponentType ascty,
-                const std::string& dumpFileName,
-                const Subchannel& sub);
+        bool addSubchannel(
+		const Subchannel& sub,
+		std::shared_ptr<DabVirtual> dabHandler);
 
         bool removeSubchannel(const Subchannel& sub);
 
@@ -65,8 +64,8 @@ class MscHandler
 
         struct SelectedStream {
             SelectedStream(
-                const Subchannel& subCh) :
-                    subCh(subCh) {}
+                const Subchannel& subCh, std::shared_ptr<DabVirtual> dabh) :
+                    subCh(subCh),dabHandler(dabh) {}
 
             const Subchannel subCh;
             std::shared_ptr<DabVirtual> dabHandler;
