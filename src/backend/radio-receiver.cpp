@@ -34,7 +34,9 @@
 #include <iostream>
 #include <memory>
 #include "radio-receiver.h"
+#ifndef NOAUDIO
 #include "dab-audio.h"
+#endif
 
 using namespace std;
 
@@ -150,6 +152,8 @@ bool RadioReceiver::playProgramme(ProgrammeHandlerInterface& handler,
     const auto comps = ficHandler.fibProcessor.getComponents(s);
     for (const auto& sc : comps) {
         if (sc.transportMode() == TransportMode::Audio) {
+
+#ifndef NOAUDIO
             const auto& subch = ficHandler.fibProcessor.getSubchannel(sc);
 
             if (subch.valid()) {
@@ -173,6 +177,8 @@ bool RadioReceiver::playProgramme(ProgrammeHandlerInterface& handler,
                     return true;
                 }
             }
+#endif
+
         }
     }
 

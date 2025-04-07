@@ -17,6 +17,7 @@ set(CMAKE_CXX_STANDARD 14)
 
 option(BUILD_WELLE_IO    "Build Welle.io"                        ON  )
 option(BUILD_WELLE_CLI   "Build welle-cli"                       ON  )
+option(BUILD_WELLE_RTK   "Build welle-rtk"                       OFF  )
 option(WITH_APP_BUNDLE   "Enable Application Bundle for macOS"   ON  )
 option(KISS_FFT          "KISS FFT instead of FFTW"              OFF )
 option(PROFILING         "Enable profiling (see README.md)"      OFF )
@@ -221,6 +222,37 @@ include_directories(
     ${FLACPP_INCLUDE_DIRS}
 )
 
+set(backend_rtk_sources
+    src/backend/charsets.cpp
+    src/backend/dab-constants.cpp
+    src/backend/mot_manager.cpp
+    src/backend/pad_decoder.cpp
+    src/backend/eep-protection.cpp
+    src/backend/fib-processor.cpp
+    src/backend/fic-handler.cpp
+    src/backend/msc-handler.cpp
+    src/backend/freq-interleaver.cpp
+    src/backend/ofdm-decoder.cpp
+    src/backend/ofdm-processor.cpp
+    src/backend/phasereference.cpp
+    src/backend/phasetable.cpp
+    src/backend/tii-decoder.cpp
+    src/backend/protTables.cpp
+    src/backend/radio-receiver.cpp
+    src/backend/tools.cpp
+    src/backend/uep-protection.cpp
+    src/backend/viterbi.cpp
+    src/various/Socket.cpp
+    src/various/Xtan2.cpp
+    src/various/channels.cpp
+    src/various/fft.cpp
+    src/various/profiling.cpp
+    src/various/wavfile.c
+    src/libs/fec/decode_rs_char.c
+    src/libs/fec/encode_rs_char.c
+    src/libs/fec/init_rs_char.c
+)
+
 set(backend_sources
     src/backend/dab-audio.cpp
     src/backend/decoder_adapter.cpp
@@ -282,6 +314,10 @@ if(ANDROID)
         src/welle-gui/android_rtl_sdr.cpp
     )
 endif()
+
+set(welle_rtk_sources
+    src/welle-rtk/welle-rtk.cpp
+)
 
 set(welle_cli_sources
     src/welle-cli/welle-cli.cpp
@@ -457,8 +493,34 @@ if(BUILD_WELLE_IO)
     endif()
 endif()
 
+if(BUILD_WELLE_RTK AND NOT ANDROID)
+    set(rtkExecutableName welle-rtk)
+    add_executable (${rtkExecutableName}
+        ${welle_rtk_sources}
+        ${backend_rtk_sources}
+        ${input_sources}
+        ${fft_sources})
+
+    if(CMAKE_BUILD_TYPE MATCHES Debug)
+      SET_TARGET_PROPERTIES(${rtkExecutableName} PROPERTIES COMPILE_FLAGS "-O2 -fno-omit-frame-pointer -fsanitize=address")
+      SET_TARGET_PROPERTIES(${rtkExecutableName} PROPERTIES LINK_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
+    endif(CMAKE_BUILD_TYPE MATCHES Debug)
+
+    SET_TARGET_PROPERTIES(${rtkExecutableName} PROPERTIES COMPILE_FLAGS "-DNOAUDIO")
+
+    target_link_libraries (${rtkExecutableName}
+      ${LIBRTLSDR_LIBRARIES}
+      ${LIBAIRSPY_LIBRARIES}
+      ${FFTW3F_LIBRARIES}
+      ${FAAD_LIBRARIES}
+      ${SoapySDR_LIBRARIES}
+      Threads::Threads
+    )
+endif(BUILD_WELLE_RTK AND NOT ANDROID)
+
 if(BUILD_WELLE_CLI AND NOT ANDROID)
     set(cliExecutableName welle-cli)
+
     add_executable (${cliExecutableName}
         ${welle_cli_sources}
         ${backend_sources}

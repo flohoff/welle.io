@@ -102,7 +102,7 @@ class RadioReceiver {
 
         RadioReceiverStats getReceiverStats() const;
 
-    private:
+    protected:
         bool playProgramme(ProgrammeHandlerInterface& handler,
                 const Service& s,
                 const std::string& dumpFileName,
