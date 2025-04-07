@@ -73,7 +73,7 @@ bool MscHandler::addAudioSubchannel(
         }
     }
 
-    SelectedStream s(handler, ascty, dumpFileName, sub);
+    SelectedStream s(handler, sub);
 
     s.dabHandler = std::make_shared<DabAudio>(
                 ascty,

@@ -66,18 +66,12 @@ class MscHandler
         struct SelectedStream {
             SelectedStream(
                 ProgrammeHandlerInterface& handler,
-                AudioServiceComponentType ascty,
-                const std::string& dumpFileName,
                 const Subchannel& subCh) :
                     handler(handler),
-                    audioType(ascty),
-                    dumpFileName(dumpFileName),
                     subCh(subCh) {}
 
             ProgrammeHandlerInterface& handler;
 
-            AudioServiceComponentType audioType;
-            const std::string dumpFileName;
             const Subchannel subCh;
 
             std::shared_ptr<DabVirtual> dabHandler;
