@@ -137,14 +137,14 @@ void DabAudio::run()
         PROFILE(DADeinterleave);
         for (i = 0; i < fragmentSize; i ++) {
             tempX[i] = interleaveData[(interleaverIndex +
-                    interleaveMap[i & 017]) & 017][i];
+                    interleaveMap[i % 16]) % 16][i];
             interleaveData[interleaverIndex][i] = data[i];
         }
         interleaverIndex = (interleaverIndex + 1) & 0x0F;
 
         //  only continue when de-interleaver is filled
-        if (countforInterleaver <= 15) {
-            countforInterleaver ++;
+        if (countforInterleaver < 16) {
+            countforInterleaver++;
             continue;
         }
 
