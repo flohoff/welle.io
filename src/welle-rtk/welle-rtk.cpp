@@ -50,8 +50,15 @@
 #include "input/input_factory.h"
 #include "input/raw_file.h"
 #include "various/channels.h"
+#include "various/MathHelper.h"
+#include "various/ringbuffer.h"
 #include "backend/dab-virtual.h"
 #include "backend/dab-constants.h"
+#include "backend/tools.h"
+#include "energy_dispersal.h"
+#include "eep-protection.h"
+#include "uep-protection.h"
+
 
 #ifdef GITDESCRIBE
 #define VERSION GITDESCRIBE
@@ -59,18 +66,255 @@
 #define VERSION "unknown"
 #endif
 
-using namespace std;
+extern "C" {
+#include <fec.h>
+}
+
+class RSDecoder {
+private:
+	void *rs_handle;
+	uint8_t rs_packet[120];
+	int corr_pos[10];
+public:
+	RSDecoder();
+	~RSDecoder();
+
+	void DecodeSuperframe(uint8_t *sf, size_t sf_len, int& total_corr_count, bool& uncorr_errors);
+};
+
+
+// --- RSDecoder -----------------------------------------------------------------
+RSDecoder::RSDecoder() {
+	rs_handle = init_rs_char(8, 0x11D, 0, 1, 10, 135);
+	if(!rs_handle)
+		throw std::runtime_error("RSDecoder: error while init_rs_char");
+}
+
+RSDecoder::~RSDecoder() {
+	free_rs_char(rs_handle);
+}
+
+void RSDecoder::DecodeSuperframe(uint8_t *sf, size_t sf_len, int& total_corr_count, bool& uncorr_errors) {
+//	// insert errors for test
+//	sf[0] ^= 0xFF;
+//	sf[10] ^= 0xFF;
+//	sf[20] ^= 0xFF;
+
+	int subch_index = sf_len / 120;
+	total_corr_count = 0;
+	uncorr_errors = false;
+
+	// process all RS packets
+	for(int i = 0; i < subch_index; i++) {
+		for(int pos = 0; pos < 120; pos++)
+			rs_packet[pos] = sf[pos * subch_index + i];
+
+		// detect errors
+		int corr_count = decode_rs_char(rs_handle, rs_packet, corr_pos, 0);
+		if(corr_count == -1)
+			uncorr_errors = true;
+		else
+			total_corr_count += corr_count;
+
+		// correct errors
+		for(int j = 0; j < corr_count; j++) {
+
+			int pos = corr_pos[j] - 135;
+			if(pos < 0)
+				continue;
+
+//			fprintf(stderr, "j: %d, pos: %d, sf-index: %d\n", j, pos, pos * subch_index + i);
+			sf[pos * subch_index + i] = rs_packet[pos];
+		}
+	}
+}
+
+
+#include <stdio.h>
+
+void dump_hex(const char *prefix, uint8_t *buf, int size) {
+	int		i;
+	unsigned char	ch;
+	char		sascii[17];
+	char		linebuffer[16*4+1];
+
+	sascii[16]=0x0;
+
+	for(i=0;i<size;i++) {
+		ch=buf[i];
+		if (i%16 == 0) {
+			sprintf(linebuffer, "%04x ", i);
+		}
+		sprintf(&linebuffer[(i%16)*3], "%02x ", ch);
+		if (ch >= ' ' && ch <= '}')
+			sascii[i%16]=ch;
+		else
+			sascii[i%16]='.';
+
+		if (i%16 == 15)
+			printf("%s %s  %s\n", prefix, linebuffer, sascii);
+	}
+
+	/* i++ after loop */
+	if (i%16 != 0) {
+		for(;i%16 != 0;i++) {
+			sprintf(&linebuffer[(i%16)*3], "   ");
+			sascii[i%16]=' ';
+		}
+
+		printf("%s %s  %s\n", prefix, linebuffer, sascii);
+	}
+}
+
+const int16_t interleaveMap[] = {0,8,4,12,2,10,6,14,1,9,5,13,3,11,7,15};
 
 class DabRTK : public DabVirtual {
 	private:
+		RSDecoder		rsdec;
+
+		std::atomic<bool>	running;
+		std::mutex		ourMutex;
+		std::thread		ourThread;
+
+		RingBuffer<softbit_t>	mscBuffer;
+		std::condition_variable	mscDataAvailable;
+
+		int16_t			fragmentSize;
+		int16_t			bitrate;
+		std::vector<uint8_t>	outV;
+		std::vector<softbit_t>	interleaveData[16];
+		std::unique_ptr<Protection> protectionHandler;
+		EnergyDispersal energyDispersal;
+
+		RSDecoder rs_dec;
 	public:
 
+	DabRTK(const Subchannel& sub) : mscBuffer(64 * 32768),fragmentSize(sub.length * CUSize),bitrate(sub.bitrate()) {
+		running = true;
+		ourThread = std::thread(&DabRTK::run, this);
+		ProtectionSettings psettings=sub.protectionSettings;
+
+		/*
+		 * We might want to check for protection - UEP is only defined 32KBit/s+ and the Adv-PPP-RTK
+		 * stream is defined as 8KBit/s so it seems to it can only be EEP.
+		 */
+		const bool profile_is_eep_a = psettings.eepProfile == EEPProtectionProfile::EEP_A;
+		protectionHandler = std::make_unique<EEPProtection>(sub.bitrate(), profile_is_eep_a, (int)psettings.eepLevel);
+
+		outV.resize(sub.bitrate() * 24);
+		for (int i=0;i<16;i++) {
+			interleaveData[i].resize(fragmentSize);
+		}
+	}
+
+	~DabRTK() {
+		running = false;
+
+		if (ourThread.joinable()) {
+			mscDataAvailable.notify_all();
+			ourThread.join();
+		}
+	}
+
+	/* Convert bit per byte vector to uint8_t vector */
+	void softbits2bytes(std::vector<uint8_t> &outbuffer, std::vector<uint8_t> &inbuffer, size_t length) {
+		uint8_t		*inbufferptr=(uint8_t *) inbuffer.data();
+
+		for (size_t i = 0; i < length; i ++) {
+			outbuffer[i] = 0;
+			for (int j = 0; j < 8; j ++) {
+				outbuffer[i] <<= 1;
+				outbuffer[i] |= inbufferptr[8 * i + j] & 01;
+			}
+		}
+	}
+
+	void run(void) {
+		std::vector<softbit_t> data(fragmentSize);
+		std::vector<softbit_t> tempX(fragmentSize);
+		int16_t interleaverIndex    = 0;
+		int16_t countforInterleaver = 0;
+		int	pcount=0;
+
+		size_t	length=24 * bitrate / 8;
+		std::vector<uint8_t>	bytes(length);
+
+		while (running) {
+			std::unique_lock<std::mutex> lock(ourMutex);
+
+			while (running && mscBuffer.GetRingBufferReadAvailable() <= fragmentSize) {
+				mscDataAvailable.wait(lock);
+			}
+
+			if (!running)
+				break;
+
+			lock.unlock();
+			mscBuffer.getDataFromBuffer(data.data(), fragmentSize);
+
+			for (int i=0;i<fragmentSize;i++) {
+				tempX[i] = interleaveData[(interleaverIndex + interleaveMap[i % 16]) % 16][i];
+				interleaveData[interleaverIndex][i] = data[i];
+			}
+			interleaverIndex = (interleaverIndex + 1) & 0x0F;
+			if (countforInterleaver < 16) {
+				countforInterleaver++;
+				continue;
+			}
+			protectionHandler->deconvolve(tempX.data(), fragmentSize, outV.data());
+			// and the inline energy dispersal
+			energyDispersal.dedisperse(outV);
+
+			softbits2bytes(bytes, outV, length);
+
+/*
+ * EN 300 401 - 5.3.5.2 - FEC for MSC packet Mod
+ * Address: this 10-bit field shall take the binary value "1111111110" (1 022).
+ */
+#define pktaddress(x)	(((x[0]) & 0x3) << 8 | (x[1]))
+
+			/* Is this an FEC packet? */
+			if (pktaddress(bytes) == 0x3fe) {
+				printf("PCount: %d\n", pcount);
+				printf("\tLength: %x\n", (bytes[0]>>6) & 0x3);
+				printf("\tCounter: %d\n", (bytes[0]>>2) & 0xf);
+				printf("\tAddress: %04x (FEC)\n", pktaddress(bytes));
+				dump_hex("\tData: ", bytes.data(), length);
+			} else {
+				/* Not FEC - Check CRC */
+				uint16_t crc=(bytes[length-2]<<8)|(bytes[length-1]);
+				uint16_t calccrc=CalcCRC::CalcCRC_CRC16_CCITT.Calc(bytes.data(), length-2);
+				printf("PCount: %d\n", pcount);
+				printf("\tCRC: %04x (%s)\n", calccrc, (crc == calccrc) ? "Valid" : "Invalid");
+				dump_hex("\tData: ", bytes.data(), length);
+			}
+
+			pcount++;
+		}
+	}
+
 	int32_t process(const softbit_t *v, int16_t cnt) {
-		std::clog << "DabRTK process cnt " << cnt << std::endl;
-		return 0;
+		int32_t fr;
+
+		if (mscBuffer.GetRingBufferWriteAvailable () < cnt) {
+			std::cerr << "DabRTK: buffer full" << std::endl;
+
+			while ((fr = mscBuffer.GetRingBufferWriteAvailable ()) <= cnt) {
+				if (!running)
+					return 0;
+				std::this_thread::sleep_for(std::chrono::microseconds(1));
+			}
+		}
+
+		mscBuffer.putDataIntoBuffer(v, cnt);
+		mscDataAvailable.notify_all();
+
+		return fr;
 	}
 };
 
+
+using namespace std;
 class RtkRadioReceiver: public RadioReceiver {
 	public:
 		RtkRadioReceiver(
@@ -79,17 +323,14 @@ class RtkRadioReceiver: public RadioReceiver {
 			RadioReceiverOptions rro,
 			int transmission_mode = 1) : RadioReceiver(rci, input, rro, transmission_mode) {};
 
-	bool RtkPlay(const Service& s) {
-		const auto comps = ficHandler.fibProcessor.getComponents(s);
-		for (const auto& sc : comps) {
-			const auto& subch = ficHandler.fibProcessor.getSubchannel(sc);
-			if (!subch.valid()) {
-				continue;
-			}
-
-			auto dabhandler=std::make_shared<DabRTK>();
-			mscHandler.addSubchannel(subch, dabhandler);
+	bool RtkPlay(const Service& s, const Subchannel& sub) {
+		if (!sub.valid()) {
+			return false;
 		}
+
+		auto dabhandler=std::make_shared<DabRTK>(sub);
+		mscHandler.addSubchannel(sub, dabhandler);
+
 		return true;
 	}
 };
@@ -194,7 +435,6 @@ class RadioInterface : public RadioControllerInterface {
 
         bool synced = false;
 };
-
 struct options_t {
     string soapySDRDriverArgs = "";
     string antenna = "";
@@ -430,7 +670,7 @@ int main(int argc, char **argv)
 			const auto& sub = rx.getSubchannel(sc);
 			if (sub.valid()) {
 				cerr << "Attaching RTK Handler to serviceid " << s.serviceId << endl;
-				rx.RtkPlay(s);
+				rx.RtkPlay(s, sub);
 			}
 
 
