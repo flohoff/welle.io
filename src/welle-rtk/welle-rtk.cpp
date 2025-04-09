@@ -41,6 +41,8 @@
 #include <utility>
 #include <cstdio>
 #include <unistd.h>
+#include <vector>
+#include <atomic>
 #ifdef HAVE_SOAPYSDR
 #  include "soapy_sdr.h"
 #endif
@@ -53,11 +55,15 @@
 #include "various/MathHelper.h"
 #include "various/ringbuffer.h"
 #include "backend/dab-virtual.h"
+#include "backend/protection.h"
 #include "backend/dab-constants.h"
 #include "backend/tools.h"
 #include "energy_dispersal.h"
 #include "eep-protection.h"
 #include "uep-protection.h"
+
+#include "DABPkt.h"
+#include "reedsolomon.h"
 
 
 #ifdef GITDESCRIBE
@@ -66,100 +72,38 @@
 #define VERSION "unknown"
 #endif
 
-extern "C" {
-#include <fec.h>
-}
-
-class RSDecoder {
-private:
-	void *rs_handle;
-	uint8_t rs_packet[120];
-	int corr_pos[10];
-public:
-	RSDecoder();
-	~RSDecoder();
-
-	void DecodeSuperframe(uint8_t *sf, size_t sf_len, int& total_corr_count, bool& uncorr_errors);
-};
-
-
-// --- RSDecoder -----------------------------------------------------------------
-RSDecoder::RSDecoder() {
-	rs_handle = init_rs_char(8, 0x11D, 0, 1, 10, 135);
-	if(!rs_handle)
-		throw std::runtime_error("RSDecoder: error while init_rs_char");
-}
-
-RSDecoder::~RSDecoder() {
-	free_rs_char(rs_handle);
-}
-
-void RSDecoder::DecodeSuperframe(uint8_t *sf, size_t sf_len, int& total_corr_count, bool& uncorr_errors) {
-//	// insert errors for test
-//	sf[0] ^= 0xFF;
-//	sf[10] ^= 0xFF;
-//	sf[20] ^= 0xFF;
-
-	int subch_index = sf_len / 120;
-	total_corr_count = 0;
-	uncorr_errors = false;
-
-	// process all RS packets
-	for(int i = 0; i < subch_index; i++) {
-		for(int pos = 0; pos < 120; pos++)
-			rs_packet[pos] = sf[pos * subch_index + i];
-
-		// detect errors
-		int corr_count = decode_rs_char(rs_handle, rs_packet, corr_pos, 0);
-		if(corr_count == -1)
-			uncorr_errors = true;
-		else
-			total_corr_count += corr_count;
-
-		// correct errors
-		for(int j = 0; j < corr_count; j++) {
-
-			int pos = corr_pos[j] - 135;
-			if(pos < 0)
-				continue;
-
-//			fprintf(stderr, "j: %d, pos: %d, sf-index: %d\n", j, pos, pos * subch_index + i);
-			sf[pos * subch_index + i] = rs_packet[pos];
-		}
-	}
-}
-
+using namespace std;
 
 #include <stdio.h>
 
-void dump_hex(const char *prefix, uint8_t *buf, int size) {
+void dump_hex(const char *prefix, uint8_t *buf, int size, int cols) {
 	int		i;
 	unsigned char	ch;
-	char		sascii[17];
-	char		linebuffer[16*4+1];
+	char		sascii[cols+1];
+	char		linebuffer[cols*4+1];
 
-	sascii[16]=0x0;
+	sascii[cols]=0x0;
 
 	for(i=0;i<size;i++) {
 		ch=buf[i];
-		if (i%16 == 0) {
+		if (i%cols == 0) {
 			sprintf(linebuffer, "%04x ", i);
 		}
-		sprintf(&linebuffer[(i%16)*3], "%02x ", ch);
+		sprintf(&linebuffer[(i%cols)*3], "%02x ", ch);
 		if (ch >= ' ' && ch <= '}')
-			sascii[i%16]=ch;
+			sascii[i%cols]=ch;
 		else
-			sascii[i%16]='.';
+			sascii[i%cols]='.';
 
-		if (i%16 == 15)
+		if (i%cols == (cols-1))
 			printf("%s %s  %s\n", prefix, linebuffer, sascii);
 	}
 
 	/* i++ after loop */
-	if (i%16 != 0) {
-		for(;i%16 != 0;i++) {
-			sprintf(&linebuffer[(i%16)*3], "   ");
-			sascii[i%16]=' ';
+	if (i%cols != 0) {
+		for(;i%cols != 0;i++) {
+			sprintf(&linebuffer[(i%cols)*3], "   ");
+			sascii[i%cols]=' ';
 		}
 
 		printf("%s %s  %s\n", prefix, linebuffer, sascii);
@@ -170,8 +114,6 @@ const int16_t interleaveMap[] = {0,8,4,12,2,10,6,14,1,9,5,13,3,11,7,15};
 
 class DabRTK : public DabVirtual {
 	private:
-		RSDecoder		rsdec;
-
 		std::atomic<bool>	running;
 		std::mutex		ourMutex;
 		std::thread		ourThread;
@@ -186,10 +128,17 @@ class DabRTK : public DabVirtual {
 		std::unique_ptr<Protection> protectionHandler;
 		EnergyDispersal energyDispersal;
 
-		RSDecoder rs_dec;
+		int	pcount=0;
+
+		void			*rs_handle;
+		std::vector<uint8_t>	rsbuffer;
+		int			corr_pos[1024];
+		ReedSolomon		rsdec;
 	public:
 
-	DabRTK(const Subchannel& sub) : mscBuffer(64 * 32768),fragmentSize(sub.length * CUSize),bitrate(sub.bitrate()) {
+	DabRTK(const Subchannel& sub) :
+			mscBuffer(64 * 32768),fragmentSize(sub.length * CUSize),bitrate(sub.bitrate()),rsdec(239, 12, 16, 24, 9, 51) {
+
 		running = true;
 		ourThread = std::thread(&DabRTK::run, this);
 		ProtectionSettings psettings=sub.protectionSettings;
@@ -216,25 +165,11 @@ class DabRTK : public DabVirtual {
 		}
 	}
 
-	/* Convert bit per byte vector to uint8_t vector */
-	void softbits2bytes(std::vector<uint8_t> &outbuffer, std::vector<uint8_t> &inbuffer, size_t length) {
-		uint8_t		*inbufferptr=(uint8_t *) inbuffer.data();
-
-		for (size_t i = 0; i < length; i ++) {
-			outbuffer[i] = 0;
-			for (int j = 0; j < 8; j ++) {
-				outbuffer[i] <<= 1;
-				outbuffer[i] |= inbufferptr[8 * i + j] & 01;
-			}
-		}
-	}
-
 	void run(void) {
 		std::vector<softbit_t> data(fragmentSize);
 		std::vector<softbit_t> tempX(fragmentSize);
 		int16_t interleaverIndex    = 0;
 		int16_t countforInterleaver = 0;
-		int	pcount=0;
 
 		size_t	length=24 * bitrate / 8;
 		std::vector<uint8_t>	bytes(length);
@@ -265,31 +200,13 @@ class DabRTK : public DabVirtual {
 			// and the inline energy dispersal
 			energyDispersal.dedisperse(outV);
 
-			softbits2bytes(bytes, outV, length);
+			auto pkt=DABPkt(outV);
+			if (rsdec.pkt_input(DABPkt(outV))) {
+				/* We have a full set and issued FEC */
 
-/*
- * EN 300 401 - 5.3.5.2 - FEC for MSC packet Mod
- * Address: this 10-bit field shall take the binary value "1111111110" (1 022).
- */
-#define pktaddress(x)	(((x[0]) & 0x3) << 8 | (x[1]))
-
-			/* Is this an FEC packet? */
-			if (pktaddress(bytes) == 0x3fe) {
-				printf("PCount: %d\n", pcount);
-				printf("\tLength: %x\n", (bytes[0]>>6) & 0x3);
-				printf("\tCounter: %d\n", (bytes[0]>>2) & 0xf);
-				printf("\tAddress: %04x (FEC)\n", pktaddress(bytes));
-				dump_hex("\tData: ", bytes.data(), length);
-			} else {
-				/* Not FEC - Check CRC */
-				uint16_t crc=(bytes[length-2]<<8)|(bytes[length-1]);
-				uint16_t calccrc=CalcCRC::CalcCRC_CRC16_CCITT.Calc(bytes.data(), length-2);
-				printf("PCount: %d\n", pcount);
-				printf("\tCRC: %04x (%s)\n", calccrc, (crc == calccrc) ? "Valid" : "Invalid");
-				dump_hex("\tData: ", bytes.data(), length);
+				/* Tell the reed solomon free packets */
+				rsdec.pkts_clear();
 			}
-
-			pcount++;
 		}
 	}
 
@@ -313,8 +230,6 @@ class DabRTK : public DabVirtual {
 	}
 };
 
-
-using namespace std;
 class RtkRadioReceiver: public RadioReceiver {
 	public:
 		RtkRadioReceiver(
@@ -672,8 +587,6 @@ int main(int argc, char **argv)
 				cerr << "Attaching RTK Handler to serviceid " << s.serviceId << endl;
 				rx.RtkPlay(s, sub);
 			}
-
-
 		}
 	}
      }

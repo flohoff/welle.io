@@ -251,6 +251,7 @@ set(backend_rtk_sources
     src/libs/fec/decode_rs_char.c
     src/libs/fec/encode_rs_char.c
     src/libs/fec/init_rs_char.c
+    src/welle-rtk/reedsolomon.cpp
 )
 
 set(backend_sources

@@ -1,0 +1,145 @@
+
+#include <stdexcept>
+#include <iostream>
+#include <string.h>
+#include "reedsolomon.h"
+#include "backend/tools.h"
+
+
+extern "C" {
+#include <fec.h>
+}
+
+#ifdef RSDEBUG
+static void dump_hex(const char *prefix, uint8_t *buf, int size, int cols) {
+	int		i;
+	unsigned char	ch;
+	char		sascii[cols+1];
+	char		linebuffer[cols*4+1];
+
+	sascii[cols]=0x0;
+
+	for(i=0;i<size;i++) {
+		ch=buf[i];
+		if (i%cols == 0) {
+			sprintf(linebuffer, "%04x ", i);
+		}
+		sprintf(&linebuffer[(i%cols)*3], "%02x ", ch);
+		if (ch >= ' ' && ch <= '}')
+			sascii[i%cols]=ch;
+		else
+			sascii[i%cols]='.';
+
+		if (i%cols == (cols-1))
+			printf("%s %s  %s\n", prefix, linebuffer, sascii);
+	}
+
+	/* i++ after loop */
+	if (i%cols != 0) {
+		for(;i%cols != 0;i++) {
+			sprintf(&linebuffer[(i%cols)*3], "   ");
+			sascii[i%cols]=' ';
+		}
+
+		printf("%s %s  %s\n", prefix, linebuffer, sascii);
+	}
+}
+#endif
+
+ReedSolomon::ReedSolomon(unsigned int columns, unsigned int rows, unsigned int feccolumns, unsigned int framelength, unsigned int frames, unsigned int pad) :
+	columns(columns),rows(rows),feccolumns(feccolumns),framelength(framelength),frames(frames),pad(pad) {
+
+	fecbuffer.resize(feccolumns*rows);
+	buffer.resize(rows*columns);
+	processbuffer.resize(rows*(columns+feccolumns));
+
+	rs_handle = init_rs_char(8, 0x11d, 0, 1, 16, 0);
+
+	if(!rs_handle)
+		throw std::runtime_error("RSDecoder: error while init_rs_char");
+
+	/* Start at the beginning */
+	pktvalid=0;
+}
+
+ReedSolomon::~ReedSolomon() {
+	free_rs_char(rs_handle);
+}
+
+bool ReedSolomon::pkts_process_fec(void ) {
+	uint8_t		rstable[rows][columns+feccolumns];
+	int		dptr=0;		/* Data ptr */
+	int		fecpkts=0;
+	int		pktbytes=0;
+	int		pktcount=0;
+
+#define FEC_PKT_HDR_LENGTH	2
+#define FEC_PKT_BYTES		22
+
+	memset(rstable, 0, rows*(columns+feccolumns));
+
+	for (auto &pkt : pkts) {
+		uint8_t	*pbuf=pkt.data();
+
+		if (pkt.is_fec()) {
+			/*
+			 * FEC packets (should be 9 in our buffer)
+			 * Must be interleaved into columns from column 239 on
+			 */
+			int poff=pkt.fec_count()*FEC_PKT_BYTES;
+			for(int i=0;i<FEC_PKT_BYTES;i++)
+				rstable[(poff+i) % rows][columns + (poff+i) / rows]=pbuf[FEC_PKT_HDR_LENGTH+i];
+
+			fecpkts++;
+		} else {
+			/* Overflowing buffer? */
+			if (dptr+pkt.size() > rows*columns) {
+				pkts_clear();
+				return false;
+			}
+
+			/* Data packet - interleave into columns */
+			for(size_t i=0;i<pkt.size();i++) {
+				rstable[dptr % rows][pad + dptr / rows]=pbuf[i];
+				dptr++;
+			}
+			pktbytes+=pkt.size();
+			pktcount++;
+		}
+	}
+
+	std::cout << "FEC pkts " << pktcount
+		<< " bytes " << pktbytes
+		<< " FEC packets " << fecpkts << std::endl;
+
+	for(unsigned int r=0;r<rows;r++) {
+		int corr_count=decode_rs_char(rs_handle, rstable[r], corr_pos, 0);
+		std::cout << "Row " << r << " Corr count: " << corr_count << std::endl;
+	}
+
+	return true;
+}
+
+void ReedSolomon::pkts_clear(void ) {
+	pkts.clear();
+	pktcount=0;
+}
+
+bool ReedSolomon::pkt_input(DABPkt pkt) {
+	pktcount++;
+	pkts.push_back(pkt);
+
+	/* We need to issue FEC if we have all 9 FEC frames (0-8) */
+	if (pkt.is_fec() && pkt.fec_count() == 8) {
+		std::cout << "Got last fec packet" << std::endl;
+		return pkts_process_fec();
+	}
+
+	/* Just a safety measure - possibly no FEC frames so we overflow memory */
+	if (pktcount > 200) {
+		std::cerr << "Zapping packet list - noone consumed?" << std::endl;
+		pkts_clear();
+	}
+
+	return false;
+}
