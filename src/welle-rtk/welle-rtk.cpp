@@ -112,6 +112,20 @@ void dump_hex(const char *prefix, uint8_t *buf, int size, int cols) {
 
 const int16_t interleaveMap[] = {0,8,4,12,2,10,6,14,1,9,5,13,3,11,7,15};
 
+class SSRZ {
+	private:
+	public:
+		void pkt_input(std::shared_ptr<DABPkt> pkt, bool direct) {
+			if (pkt->is_fec())
+				return;
+			if (pkt->is_empty())
+				return;
+
+			std::cout << "Got packet - direct " << direct << std::endl;
+			std::cout << *pkt << std::endl;
+		};
+};
+
 class DabRTK : public DabVirtual {
 	private:
 		std::atomic<bool>	running;
@@ -134,6 +148,7 @@ class DabRTK : public DabVirtual {
 		std::vector<uint8_t>	rsbuffer;
 		int			corr_pos[1024];
 		ReedSolomon		rsdec;
+		SSRZ			ssrz;
 	public:
 
 	DabRTK(const Subchannel& sub) :
@@ -200,9 +215,15 @@ class DabRTK : public DabVirtual {
 			// and the inline energy dispersal
 			energyDispersal.dedisperse(outV);
 
-			auto pkt=DABPkt(outV);
-			if (rsdec.pkt_input(DABPkt(outV))) {
+			auto pkt=std::make_shared<DABPkt>(DABPkt(outV));
+			ssrz.pkt_input(pkt, true);
+			if (rsdec.pkt_input(pkt)) {
 				/* We have a full set and issued FEC */
+
+				auto pktlist=rsdec.pkt_list();
+				for (auto pkt : pktlist) {
+					ssrz.pkt_input(pkt, false);
+				}
 
 				/* Tell the reed solomon free packets */
 				rsdec.pkts_clear();

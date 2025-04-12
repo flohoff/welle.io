@@ -39,7 +39,7 @@ class ReedSolomon {
 		std::vector<uint8_t>	fecbuffer;
 
 		int	pktcount;
-		std::list<DABPkt>	pkts;
+		std::list<std::shared_ptr<DABPkt>>	pkts;
 
 		unsigned int	columns;
 		unsigned int	rows;
@@ -54,6 +54,7 @@ class ReedSolomon {
 	public:
 		ReedSolomon(unsigned int columns, unsigned int rows, unsigned int feccolumns, unsigned int framelength, unsigned int frames, unsigned int pad);
 		~ReedSolomon();
-		bool pkt_input(DABPkt pkt);
+		bool pkt_input(std::shared_ptr<DABPkt> pkt);
 		void pkts_clear(void );
+		std::list<std::shared_ptr<DABPkt>> pkt_list(void );
 };

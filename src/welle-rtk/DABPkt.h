@@ -3,8 +3,11 @@
 
 #include <vector>
 #include <cstdint>
+#include <iostream>
 
+#include "hexdump.hpp"
 #include "backend/dab-constants.h"
+
 
 /*
  * EN 300 401 - 5.3.5.2 - FEC for MSC packet Mod
@@ -62,8 +65,21 @@ class DABPkt {
 			return (pktaddress(buffer.data()) == 0x3fe);
 		};
 
+		bool is_empty(void ) {
+			return (pktaddress(buffer.data()) == 0);
+		}
+
 		short fec_count(void ) {
 			return pktcounter(buffer.data());
 		};
+
+
+		friend std::ostream& operator<<(std::ostream& out, const DABPkt &pkt) {
+			return out << "Length " << pkt.buffer.size() << std::endl
+				<< Hexdump((const void *) pkt.buffer.data(), pkt.buffer.size());
+		}
 };
+
+std::ostream& operator<<(std::ostream& out, const DABPkt &pkt);
+
 #endif

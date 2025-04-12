@@ -72,6 +72,10 @@ ReedSolomon::~ReedSolomon() {
 	free_rs_char(rs_handle);
 }
 
+std::list<std::shared_ptr<DABPkt>> ReedSolomon::pkt_list(void ) {
+	return pkts;
+}
+
 bool ReedSolomon::pkts_process_fec(void ) {
 	uint8_t		rstable[rows][columns+feccolumns];
 	int		dptr=0;		/* Data ptr */
@@ -85,31 +89,31 @@ bool ReedSolomon::pkts_process_fec(void ) {
 	memset(rstable, 0, rows*(columns+feccolumns));
 
 	for (auto &pkt : pkts) {
-		uint8_t	*pbuf=pkt.data();
+		uint8_t	*pbuf=pkt->data();
 
-		if (pkt.is_fec()) {
+		if (pkt->is_fec()) {
 			/*
 			 * FEC packets (should be 9 in our buffer)
 			 * Must be interleaved into columns from column 239 on
 			 */
-			int poff=pkt.fec_count()*FEC_PKT_BYTES;
+			int poff=pkt->fec_count()*FEC_PKT_BYTES;
 			for(int i=0;i<FEC_PKT_BYTES;i++)
 				rstable[(poff+i) % rows][columns + (poff+i) / rows]=pbuf[FEC_PKT_HDR_LENGTH+i];
 
 			fecpkts++;
 		} else {
 			/* Overflowing buffer? */
-			if (dptr+pkt.size() > rows*columns) {
+			if (dptr+pkt->size() > rows*columns) {
 				pkts_clear();
 				return false;
 			}
 
 			/* Data packet - interleave into columns */
-			for(size_t i=0;i<pkt.size();i++) {
+			for(size_t i=0;i<pkt->size();i++) {
 				rstable[dptr % rows][pad + dptr / rows]=pbuf[i];
 				dptr++;
 			}
-			pktbytes+=pkt.size();
+			pktbytes+=pkt->size();
 			pktcount++;
 		}
 	}
@@ -133,13 +137,13 @@ bool ReedSolomon::pkts_process_fec(void ) {
 			unsigned int cpos=corr_pos[i];
 
 			for (auto &pkt : pkts) {
-				uint8_t	*pbuf=pkt.data();
+				uint8_t	*pbuf=pkt->data();
 
 				/* Data packet - interleave into columns */
-				for(size_t j=0;j<pkt.size();j++) {
+				for(size_t j=0;j<pkt->size();j++) {
 					if ((dptr % rows == r) && ((pad + dptr / rows) == cpos)) {
 						pbuf[j]=rstable[dptr % rows][pad + dptr / rows];
-						pkt.corrected_increase();
+						pkt->corrected_increase();
 					}
 					dptr++;
 				}
@@ -155,12 +159,12 @@ void ReedSolomon::pkts_clear(void ) {
 	pktcount=0;
 }
 
-bool ReedSolomon::pkt_input(DABPkt pkt) {
+bool ReedSolomon::pkt_input(std::shared_ptr<DABPkt> pkt) {
 	pktcount++;
 	pkts.push_back(pkt);
 
 	/* We need to issue FEC if we have all 9 FEC frames (0-8) */
-	if (pkt.is_fec() && pkt.fec_count() == 8) {
+	if (pkt->is_fec() && pkt->fec_count() == 8) {
 #ifdef RSDEBUG
 		std::cout << "Got last fec packet" << std::endl;
 #endif
