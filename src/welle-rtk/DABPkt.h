@@ -21,6 +21,7 @@
 class DABPkt {
 	private:
 		std::vector<uint8_t>	buffer;
+		uint8_t			feccorrectedbytes=0;
 
 	public:
 		DABPkt(const std::vector<uint8_t> &bits) {
@@ -43,6 +44,14 @@ class DABPkt {
 
 		uint8_t *data(void ) {
 			return buffer.data();
+		}
+
+		uint8_t	corrected(void ) {
+			return feccorrectedbytes;
+		}
+
+		uint8_t corrected_increase(void ) {
+			return feccorrectedbytes++;
 		}
 
 		/*

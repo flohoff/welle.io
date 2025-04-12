@@ -53,6 +53,12 @@ ReedSolomon::ReedSolomon(unsigned int columns, unsigned int rows, unsigned int f
 	buffer.resize(rows*columns);
 	processbuffer.resize(rows*(columns+feccolumns));
 
+	/*
+	 * Symbol size 8 bit
+	 * Poly 0x11d
+	 * 16 bytes per row RS / FEC bytes
+	 * 0 padding (We do it before we decode)
+	 */
 	rs_handle = init_rs_char(8, 0x11d, 0, 1, 16, 0);
 
 	if(!rs_handle)
@@ -108,13 +114,37 @@ bool ReedSolomon::pkts_process_fec(void ) {
 		}
 	}
 
+#ifdef RSDEBUG
 	std::cout << "FEC pkts " << pktcount
 		<< " bytes " << pktbytes
 		<< " FEC packets " << fecpkts << std::endl;
+#endif
 
 	for(unsigned int r=0;r<rows;r++) {
 		int corr_count=decode_rs_char(rs_handle, rstable[r], corr_pos, 0);
-		std::cout << "Row " << r << " Corr count: " << corr_count << std::endl;
+		/*
+		 * We need to copy back to packet buffers in case of corrected bytes
+		 * As we copyied them interleaved into the rows we need to walk through
+		 * again and if it matches to the corrected position copy back the byte.
+		 *
+		 */
+		for(int i=0;i<corr_count;i++) {
+			dptr=0;
+			unsigned int cpos=corr_pos[i];
+
+			for (auto &pkt : pkts) {
+				uint8_t	*pbuf=pkt.data();
+
+				/* Data packet - interleave into columns */
+				for(size_t j=0;j<pkt.size();j++) {
+					if ((dptr % rows == r) && ((pad + dptr / rows) == cpos)) {
+						pbuf[j]=rstable[dptr % rows][pad + dptr / rows];
+						pkt.corrected_increase();
+					}
+					dptr++;
+				}
+			}
+		}
 	}
 
 	return true;
@@ -131,13 +161,17 @@ bool ReedSolomon::pkt_input(DABPkt pkt) {
 
 	/* We need to issue FEC if we have all 9 FEC frames (0-8) */
 	if (pkt.is_fec() && pkt.fec_count() == 8) {
+#ifdef RSDEBUG
 		std::cout << "Got last fec packet" << std::endl;
+#endif
 		return pkts_process_fec();
 	}
 
 	/* Just a safety measure - possibly no FEC frames so we overflow memory */
 	if (pktcount > 200) {
+#ifdef RSDEBUG
 		std::cerr << "Zapping packet list - noone consumed?" << std::endl;
+#endif
 		pkts_clear();
 	}
 
