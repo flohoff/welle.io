@@ -21,6 +21,16 @@
  */
 #define pktcounter(x)   ((x[0] >> 2) & 0xf)
 
+/*
+ * EN 300 401 - 5.3.2.1 - Packet header Continuity index
+ */
+#define pktcontinuity(x)   ((x[0] >> 4) & 0x3)
+
+/*
+ * EN 300 401 - 5.3.2.1 - Packet header First/Last
+ */
+#define pktfirstlast(x)   ((x[0] >> 2) & 0x3)
+
 
 class DABPkt {
 	private:
@@ -28,8 +38,9 @@ class DABPkt {
 		bool			fechandled=false;
 		uint8_t			fecbytes=0;
 
+		int			seqno;
 	public:
-		DABPkt(const std::vector<uint8_t> &bits) {
+		DABPkt(int seqno, const std::vector<uint8_t> &bits) : seqno(seqno) {
 			const uint8_t	*bitbuffer=bits.data();
 
 			buffer.resize(bits.size() / 8);
@@ -61,6 +72,10 @@ class DABPkt {
 
 		uint8_t	fec_bytes(void ) {
 			return fecbytes;
+		}
+
+		int seq(void ) {
+			return seqno;
 		}
 
 		uint8_t fec_bytes_inc(void ) {
@@ -96,6 +111,14 @@ class DABPkt {
 
 		bool is_empty(void ) {
 			return (pktaddress(buffer.data()) == 0);
+		}
+
+		uint8_t	continuity(void ) {
+			return pktcontinuity(buffer.data());
+		}
+
+		uint8_t	firstlast(void ) {
+			return pktfirstlast(buffer.data());
 		}
 
 		short fec_count(void ) {

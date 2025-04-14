@@ -194,6 +194,7 @@ class DabRTK : public DabVirtual {
 		std::vector<softbit_t> tempX(fragmentSize);
 		int16_t interleaverIndex    = 0;
 		int16_t countforInterleaver = 0;
+		int	seq=0;
 
 		size_t	length=24 * bitrate / 8;
 		std::vector<uint8_t>	bytes(length);
@@ -224,7 +225,7 @@ class DabRTK : public DabVirtual {
 			// and the inline energy dispersal
 			energyDispersal.dedisperse(outV);
 
-			auto pkt=std::make_shared<DABPkt>(DABPkt(outV));
+			auto pkt=std::make_shared<DABPkt>(DABPkt(seq++, outV));
 			rsdec.input(pkt);
 		}
 	}
