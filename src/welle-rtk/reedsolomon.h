@@ -4,6 +4,7 @@
 #include <list>		// std::list
 			//
 #include "DABPkt.h"
+#include "DABPktConsumer.h"
 
 /*
  * EN 300 401 - 5.3.5.2 - FEC for MSC packet Mod
@@ -26,7 +27,7 @@
 #define pktusefullen(x) ((x[2]) & 0x7f)
 
 
-class ReedSolomon {
+class ReedSolomon : DABPktConsumer {
 	private:
 		std::vector<bool>	framereceived;
 		std::vector<uint8_t>	buffer;
@@ -41,6 +42,8 @@ class ReedSolomon {
 		int	pktcount;
 		std::list<std::shared_ptr<DABPkt>>	pkts;
 
+		DABPktConsumer	&consumer;
+
 		unsigned int	columns;
 		unsigned int	rows;
 		unsigned int	feccolumns;
@@ -49,12 +52,15 @@ class ReedSolomon {
 		unsigned int	pad;
 
 		int	pktvalid;
+
 	private:
 		bool pkts_process_fec(void );
 	public:
-		ReedSolomon(unsigned int columns, unsigned int rows, unsigned int feccolumns, unsigned int framelength, unsigned int frames, unsigned int pad);
+		ReedSolomon(DABPktConsumer &consumer, unsigned int columns, unsigned int rows,
+				unsigned int feccolumns, unsigned int framelength,
+				unsigned int frames, unsigned int pad);
 		~ReedSolomon();
-		bool pkt_input(std::shared_ptr<DABPkt> pkt);
+		void input(std::shared_ptr<DABPkt> pkt);
 		void pkts_clear(void );
 		std::list<std::shared_ptr<DABPkt>> pkt_list(void );
 };

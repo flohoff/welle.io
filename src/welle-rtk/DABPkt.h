@@ -7,6 +7,7 @@
 
 #include "hexdump.hpp"
 #include "backend/dab-constants.h"
+#include "backend/tools.h"
 
 
 /*
@@ -24,7 +25,8 @@
 class DABPkt {
 	private:
 		std::vector<uint8_t>	buffer;
-		uint8_t			feccorrectedbytes=0;
+		bool			fechandled=false;
+		uint8_t			fecbytes=0;
 
 	public:
 		DABPkt(const std::vector<uint8_t> &bits) {
@@ -49,12 +51,35 @@ class DABPkt {
 			return buffer.data();
 		}
 
-		uint8_t	corrected(void ) {
-			return feccorrectedbytes;
+		void fec_handled_set(bool state) {
+			fechandled=state;
 		}
 
-		uint8_t corrected_increase(void ) {
-			return feccorrectedbytes++;
+		bool fec_handled(void ) {
+			return fechandled;
+		}
+
+		uint8_t	fec_bytes(void ) {
+			return fecbytes;
+		}
+
+		uint8_t fec_bytes_inc(void ) {
+			return fecbytes++;
+		}
+
+		bool crc_correct(void ) {
+			return (crc_calc() == crc());
+		}
+
+		uint16_t crc_calc(void ) {
+			uint16_t crc=CalcCRC::CalcCRC_CRC16_CCITT.Calc((const uint8_t *) buffer.data(), (size_t) buffer.size()-2);
+			return crc;
+		}
+
+		uint16_t crc(void ) {
+			uint8_t	*dptr=buffer.data()+buffer.size()-2;
+
+			return dptr[0]<<8|dptr[1];
 		}
 
 		/*
@@ -64,6 +89,10 @@ class DABPkt {
 		bool is_fec(void ) {
 			return (pktaddress(buffer.data()) == 0x3fe);
 		};
+
+		uint16_t address(void ) {
+			return pktaddress(buffer.data());
+		}
 
 		bool is_empty(void ) {
 			return (pktaddress(buffer.data()) == 0);

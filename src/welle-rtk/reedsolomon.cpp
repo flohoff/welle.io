@@ -46,8 +46,10 @@ static void dump_hex(const char *prefix, uint8_t *buf, int size, int cols) {
 }
 #endif
 
-ReedSolomon::ReedSolomon(unsigned int columns, unsigned int rows, unsigned int feccolumns, unsigned int framelength, unsigned int frames, unsigned int pad) :
-	columns(columns),rows(rows),feccolumns(feccolumns),framelength(framelength),frames(frames),pad(pad) {
+ReedSolomon::ReedSolomon(DABPktConsumer &consumer, unsigned int columns, unsigned int rows,
+			unsigned int feccolumns, unsigned int framelength,
+			unsigned int frames, unsigned int pad) :
+	consumer(consumer), columns(columns),rows(rows),feccolumns(feccolumns),framelength(framelength),frames(frames),pad(pad) {
 
 	fecbuffer.resize(feccolumns*rows);
 	buffer.resize(rows*columns);
@@ -143,7 +145,7 @@ bool ReedSolomon::pkts_process_fec(void ) {
 				for(size_t j=0;j<pkt->size();j++) {
 					if ((dptr % rows == r) && ((pad + dptr / rows) == cpos)) {
 						pbuf[j]=rstable[dptr % rows][pad + dptr / rows];
-						pkt->corrected_increase();
+						pkt->fec_bytes_inc();
 					}
 					dptr++;
 				}
@@ -159,16 +161,30 @@ void ReedSolomon::pkts_clear(void ) {
 	pktcount=0;
 }
 
-bool ReedSolomon::pkt_input(std::shared_ptr<DABPkt> pkt) {
+void ReedSolomon::input(std::shared_ptr<DABPkt> pkt) {
 	pktcount++;
 	pkts.push_back(pkt);
+
+	/* Immediatly push pakets further */
+	consumer.input(pkt);
 
 	/* We need to issue FEC if we have all 9 FEC frames (0-8) */
 	if (pkt->is_fec() && pkt->fec_count() == 8) {
 #ifdef RSDEBUG
 		std::cout << "Got last fec packet" << std::endl;
 #endif
-		return pkts_process_fec();
+		/* After successful FEC push packets to consumer */
+		if (pkts_process_fec()) {
+			auto pktlist=pkts;
+			for (auto pkt : pktlist) {
+				pkt->fec_handled_set(true);
+				consumer.input(pkt);
+			}
+		}
+
+		pkts_clear();
+
+		return;
 	}
 
 	/* Just a safety measure - possibly no FEC frames so we overflow memory */
@@ -179,5 +195,5 @@ bool ReedSolomon::pkt_input(std::shared_ptr<DABPkt> pkt) {
 		pkts_clear();
 	}
 
-	return false;
+	return;
 }

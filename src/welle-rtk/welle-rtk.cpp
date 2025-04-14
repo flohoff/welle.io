@@ -63,6 +63,8 @@
 #include "uep-protection.h"
 
 #include "DABPkt.h"
+#include "DABPktDataDemux.h"
+#include "DABPktDataFrameAggregator.h"
 #include "reedsolomon.h"
 
 
@@ -148,15 +150,19 @@ class DabRTK : public DabVirtual {
 		std::vector<uint8_t>	rsbuffer;
 		int			corr_pos[1024];
 		ReedSolomon		rsdec;
+		DABPktDataDemux		demux;
+		DABPktDataFrameAggregator	frameagg;
 		SSRZ			ssrz;
 	public:
 
 	DabRTK(const Subchannel& sub) :
-			mscBuffer(64 * 32768),fragmentSize(sub.length * CUSize),bitrate(sub.bitrate()),rsdec(239, 12, 16, 24, 9, 51) {
+			mscBuffer(64 * 32768),
+			fragmentSize(sub.length * CUSize),
+			bitrate(sub.bitrate()),rsdec(demux, 239, 12, 16, 24, 9, 51) {
 
-		running = true;
-		ourThread = std::thread(&DabRTK::run, this);
 		ProtectionSettings psettings=sub.protectionSettings;
+
+		demux.demux_add(2, frameagg);
 
 		/*
 		 * We might want to check for protection - UEP is only defined 32KBit/s+ and the Adv-PPP-RTK
@@ -169,6 +175,9 @@ class DabRTK : public DabVirtual {
 		for (int i=0;i<16;i++) {
 			interleaveData[i].resize(fragmentSize);
 		}
+
+		running = true;
+		ourThread = std::thread(&DabRTK::run, this);
 	}
 
 	~DabRTK() {
@@ -216,18 +225,7 @@ class DabRTK : public DabVirtual {
 			energyDispersal.dedisperse(outV);
 
 			auto pkt=std::make_shared<DABPkt>(DABPkt(outV));
-			ssrz.pkt_input(pkt, true);
-			if (rsdec.pkt_input(pkt)) {
-				/* We have a full set and issued FEC */
-
-				auto pktlist=rsdec.pkt_list();
-				for (auto pkt : pktlist) {
-					ssrz.pkt_input(pkt, false);
-				}
-
-				/* Tell the reed solomon free packets */
-				rsdec.pkts_clear();
-			}
+			rsdec.input(pkt);
 		}
 	}
 
