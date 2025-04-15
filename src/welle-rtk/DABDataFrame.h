@@ -13,7 +13,7 @@
 #include "DABPkt.h"
 
 class DABDataFrame {
-	private:
+	protected:
 		std::vector<uint8_t>	buffer;
 	public:
 		DABDataFrame(void )  {
@@ -38,6 +38,51 @@ class DABDataFrame {
 
 		uint8_t *data(void ) {
 			return buffer.data();
+		}
+
+		uint16_t dg_crc(void ) {
+			uint8_t *dptr=buffer.data()+buffer.size()-2;
+			return dptr[0]<<8|dptr[1];
+		}
+
+		bool dg_crc_correct(void ) {
+			uint16_t ccrc=CalcCRC::CalcCRC_CRC16_CCITT.Calc((const uint8_t *) buffer.data(), (size_t) buffer.size()-2);
+			return (dg_crc() == ccrc);
+		}
+
+#define DG_EXTENSION_FLAG	0x80
+#define DG_CRC_FLAG		0x40
+#define DG_SEGMENT_FLAG		0x20
+#define DG_USERACCESS_FLAG	0x10
+
+		bool dg_has_crc(void ) {
+			/* EN 300 401 V2.1.1 5.3.3.0 */
+			return (buffer.data()[0] & DG_CRC_FLAG) != 0;
+		}
+
+		bool dg_has_segment(void ) {
+			/* EN 300 401 V2.1.1 5.3.3.0 */
+			return (buffer.data()[0] & DG_SEGMENT_FLAG) != 0;
+		}
+
+		bool dg_has_useraccess(void ) {
+			/* EN 300 401 V2.1.1 5.3.3.0 */
+			return (buffer.data()[0] & DG_USERACCESS_FLAG) != 0;
+		}
+
+		bool dg_has_extension(void ) {
+			/* EN 300 401 V2.1.1 5.3.3.0 */
+			return (buffer.data()[0] & DG_EXTENSION_FLAG) != 0;
+		}
+
+		uint8_t dg_continuity(void ) {
+			/* EN 400 401 V2.1.1 5.3.3.1 */
+			return (buffer.data()[1] & 0xf0) >> 4;
+		}
+
+		uint8_t dg_repetition(void ) {
+			/* EN 400 401 V2.1.1 5.3.3.1 */
+			return (buffer.data()[1] & 0xf);
 		}
 
 		friend std::ostream& operator<<(std::ostream& out, const DABDataFrame &frame) {

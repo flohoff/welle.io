@@ -66,6 +66,8 @@
 #include "DABPktDataDemux.h"
 #include "DABPktDataDeDupe.h"
 #include "DABPktDataFrameAggregator.h"
+#include "DABDataGroup.h"
+
 #include "reedsolomon.h"
 
 
@@ -154,6 +156,7 @@ class DabRTK : public DabVirtual {
 		DABPktDataDemux		demux;
 		DABPktDataFrameAggregator	frameagg;
 		DABPktDataDeDupe	dedupe;
+		DABDataGroup		dgframe;
 		SSRZ			ssrz;
 	public:
 
@@ -162,6 +165,7 @@ class DabRTK : public DabVirtual {
 			fragmentSize(sub.length * CUSize),
 			bitrate(sub.bitrate()),
 			rsdec(demux, 239, 12, 16, 24, 9, 51),
+			frameagg(dgframe),
 			dedupe(frameagg) {
 
 		ProtectionSettings psettings=sub.protectionSettings;

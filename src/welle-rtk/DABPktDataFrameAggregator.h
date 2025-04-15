@@ -3,6 +3,7 @@
 
 #include "DABDataFrame.h"
 #include "DABPktConsumer.h"
+#include "DABDataFrameConsumer.h"
 
 /* EN 300 401 V2.1.1
  *
@@ -31,8 +32,11 @@ class DABPktDataFrameAggregator : public DABPktConsumer {
 		uint8_t continuity_last;
 		int	numpkts=0;
 		std::vector<std::shared_ptr<DABPkt>>	pkts;
+
+		DABDataFrameConsumer	&consumer;
 	public:
 		~DABPktDataFrameAggregator() {};
+		DABPktDataFrameAggregator(DABDataFrameConsumer &_consumer) : consumer(_consumer) {};
 
 		uint8_t continuity_expected(void ) {
 			return ((continuity_last+1)&0x3);
@@ -53,18 +57,20 @@ class DABPktDataFrameAggregator : public DABPktConsumer {
 				return;
 			}
 
+			// FIXME We want to check last packet to contain ->frame_last() == true
+
 			auto frame=std::make_shared<DABDataFrame>(DABDataFrame());
 
 			for (auto pkt : pkts) {
 				// FIXME We want to check CRC and frame continuity and drop frame
-				// if it fails.
-				//
-				//std::cout << pkt << std::endl;
-
 				frame->append(pkt);
 			}
 
+#ifdef DEBUG_FRAMEAGGREGATOR
 			std::cout << *frame << std::endl;
+#endif
+
+			consumer.input(frame);
 		}
 
 		void input(std::shared_ptr<DABPkt> pkt) {
