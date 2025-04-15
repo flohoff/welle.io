@@ -31,6 +31,11 @@
  */
 #define pktfirstlast(x)   ((x[0] >> 2) & 0x3)
 
+/*
+ * EN 300 401 - 5.3.2.0 - Useful data length
+ */
+#define pktusefuldatalen(x)   (x[2] & 0x7f)
+
 
 class DABPkt {
 	private:
@@ -60,6 +65,10 @@ class DABPkt {
 
 		uint8_t *data(void ) {
 			return buffer.data();
+		}
+
+		const std::vector<uint8_t> &data_vector(void ) {
+			return buffer;
 		}
 
 		void fec_handled_set(bool state) {
@@ -115,6 +124,10 @@ class DABPkt {
 
 		uint8_t	continuity(void ) {
 			return pktcontinuity(buffer.data());
+		}
+
+		uint8_t data_len(void ) {
+			return pktusefuldatalen(buffer.data());
 		}
 
 		uint8_t	frame_firstlast(void ) {
