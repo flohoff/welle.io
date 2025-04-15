@@ -120,7 +120,14 @@ bool ReedSolomon::pkts_process_fec(void ) {
 		}
 	}
 
-#ifdef RSDEBUG
+#define FEC_EXACT_BYTES	2256
+
+	if (pktbytes != FEC_EXACT_BYTES) {
+		std::cerr << "Unable to run FEC - did not receive all packets" << std::endl;
+		return false;
+	}
+
+#if 1 // #ifdef RSDEBUG || 1
 	std::cout << "FEC pkts " << pktcount
 		<< " bytes " << pktbytes
 		<< " FEC packets " << fecpkts << std::endl;
@@ -134,6 +141,10 @@ bool ReedSolomon::pkts_process_fec(void ) {
 		 * again and if it matches to the corrected position copy back the byte.
 		 *
 		 */
+
+		if (corr_count < 0) {
+			std::cerr << "Uncorrectable errors in FEC" << std::endl;
+		}
 
 		// FIXME - Mark packets which may contain uncorrectable errors
 		for(int i=0;i<corr_count;i++) {
