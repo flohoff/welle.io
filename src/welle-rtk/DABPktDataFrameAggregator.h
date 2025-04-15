@@ -1,6 +1,7 @@
 #ifndef DABPKTDATAFRAMEAGGREGATOR_H
 #define DABPKTDATAFRAMEAGGREGATOR_H
 
+#include "DABDataFrame.h"
 #include "DABPktConsumer.h"
 
 /* EN 300 401 V2.1.1
@@ -37,7 +38,37 @@ class DABPktDataFrameAggregator : public DABPktConsumer {
 			return ((continuity_last+1)&0x3);
 		}
 
+		/* When called we assume the first packet in the list
+		 *
+		 * to have pkt->frame_first() == true, and the last packet
+		 * to have pkt->frame_last() == true
+		 *
+		 * if this is not the case we simply drop the frame.
+		 */
+		void aggregate(void ) {
+			uint8_t		cont=pkts[0]->continuity();
+
+			if (!pkts[0]->frame_first()) {
+				std::cerr << "First packet in aggregator not marked as first" << std::endl;
+				return;
+			}
+
+			auto frame=std::make_shared<DABDataFrame>(DABDataFrame());
+
+			for (auto pkt : pkts) {
+				// FIXME We want to check CRC and frame continuity and drop frame
+				// if it fails.
+				//
+				//std::cout << pkt << std::endl;
+
+				frame->append(pkt);
+			}
+
+			std::cout << *frame << std::endl;
+		}
+
 		void input(std::shared_ptr<DABPkt> pkt) {
+#ifdef DEBUG_FRAMEAGGREGATOR
 			std::cout << "Address " << pkt->address()
 				<< " PktSeq " << pkt->seq()
 				<< " FEC handled " << (pkt->fec_handled() ? "Yes" : "No")
@@ -45,6 +76,8 @@ class DABPktDataFrameAggregator : public DABPktConsumer {
 				<< " Continuity " << (int) pkt->continuity()
 				<< " FirstLast " << (int) pkt->frame_firstlast()
 				<< std::endl;
+#endif
+			continuity_last=pkt->continuity();
 
 			if (pkt->frame_first() || pkt->frame_oneandonly()) {
 				pkts.clear();
@@ -53,15 +86,9 @@ class DABPktDataFrameAggregator : public DABPktConsumer {
 			pkts.push_back(pkt);
 
 			if (pkt->frame_last() || pkt->frame_oneandonly()) {
-				//aggregate();
+				aggregate();
+				pkts.clear();
 			}
-
-			if (pkt->continuity() != continuity_expected()) {
-				std::cerr << "Continuity mismatch" << std::endl;
-				return;
-			}
-
-			continuity_last=pkt->continuity();
 		}
 };
 
