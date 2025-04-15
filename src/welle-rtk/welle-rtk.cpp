@@ -64,6 +64,7 @@
 
 #include "DABPkt.h"
 #include "DABPktDataDemux.h"
+#include "DABPktDataDeDupe.h"
 #include "DABPktDataFrameAggregator.h"
 #include "reedsolomon.h"
 
@@ -152,17 +153,21 @@ class DabRTK : public DabVirtual {
 		ReedSolomon		rsdec;
 		DABPktDataDemux		demux;
 		DABPktDataFrameAggregator	frameagg;
+		DABPktDataDeDupe	dedupe;
 		SSRZ			ssrz;
 	public:
 
 	DabRTK(const Subchannel& sub) :
 			mscBuffer(64 * 32768),
 			fragmentSize(sub.length * CUSize),
-			bitrate(sub.bitrate()),rsdec(demux, 239, 12, 16, 24, 9, 51) {
+			bitrate(sub.bitrate()),
+			rsdec(demux, 239, 12, 16, 24, 9, 51),
+			dedupe(frameagg) {
 
 		ProtectionSettings psettings=sub.protectionSettings;
 
-		demux.demux_add(2, frameagg);
+		// FIXME Packet address from MSC
+		demux.demux_add(2, dedupe);
 
 		/*
 		 * We might want to check for protection - UEP is only defined 32KBit/s+ and the Adv-PPP-RTK
@@ -226,6 +231,12 @@ class DabRTK : public DabVirtual {
 			energyDispersal.dedisperse(outV);
 
 			auto pkt=std::make_shared<DABPkt>(DABPkt(seq++, outV));
+
+#ifdef DEBUG_PRODUCECRCERROR
+			if (seq % 101 == 0)
+				pkt->data()[13]^=0x40;
+#endif
+
 			rsdec.input(pkt);
 		}
 	}

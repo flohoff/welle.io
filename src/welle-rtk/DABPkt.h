@@ -117,8 +117,20 @@ class DABPkt {
 			return pktcontinuity(buffer.data());
 		}
 
-		uint8_t	firstlast(void ) {
+		uint8_t	frame_firstlast(void ) {
 			return pktfirstlast(buffer.data());
+		}
+
+		uint8_t frame_first(void ) {
+			return pktfirstlast(buffer.data()) == 0x2;
+		}
+
+		uint8_t frame_oneandonly(void ) {
+			return pktfirstlast(buffer.data()) == 0x3;
+		}
+
+		uint8_t frame_last(void ) {
+			return pktfirstlast(buffer.data()) == 0x1;
 		}
 
 		short fec_count(void ) {

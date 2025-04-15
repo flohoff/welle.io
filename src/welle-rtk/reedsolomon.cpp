@@ -134,6 +134,8 @@ bool ReedSolomon::pkts_process_fec(void ) {
 		 * again and if it matches to the corrected position copy back the byte.
 		 *
 		 */
+
+		// FIXME - Mark packets which may contain uncorrectable errors
 		for(int i=0;i<corr_count;i++) {
 			dptr=0;
 			unsigned int cpos=corr_pos[i];
@@ -174,6 +176,8 @@ void ReedSolomon::input(std::shared_ptr<DABPkt> pkt) {
 		std::cout << "Got last fec packet" << std::endl;
 #endif
 		/* After successful FEC push packets to consumer */
+		// FIXME Regardless of the return code - push packets to
+		// allow the assumption that WITH FEC all packets appear twice
 		if (pkts_process_fec()) {
 			auto pktlist=pkts;
 			for (auto pkt : pktlist) {
